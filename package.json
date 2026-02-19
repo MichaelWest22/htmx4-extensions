@@ -1,0 +1,10 @@
+{
+    "name": "htmx4-extensions",
+    "version": "1.0.0",
+    "scripts": {
+      "dist": "./scripts/dist-all.sh"
+    },
+    "devDependencies": {
+      "terser": "^5.36.0"
+    }
+}
