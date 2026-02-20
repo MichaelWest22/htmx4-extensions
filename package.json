@@ -1,10 +1,11 @@
 {
-    "name": "htmx4-extensions",
-    "version": "1.0.0",
-    "scripts": {
-      "dist": "./scripts/dist-all.sh"
-    },
-    "devDependencies": {
-      "terser": "^5.36.0"
-    }
+  "name": "htmx4-extensions",
+  "version": "4.0.0",
+  "description": "Personal repository for htmx 4 extensions",
+  "scripts": {
+    "test": "echo \"Open test/test.html in a browser to run tests\""
+  },
+  "keywords": ["htmx", "extensions"],
+  "author": "",
+  "license": "BSD-0-Clause"
 }

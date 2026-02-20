@@ -84,9 +84,11 @@ Extensions use event-based hooks instead of callbacks. Hook names use underscore
   htmx_after_swap: function(elt, detail) {},
   htmx_before_settle: function(elt, detail) {},
   htmx_after_settle: function(elt, detail) {},
-  htmx_handle_swap: function(target, detail) { return false; }  // Return true if handled
+  handle_swap: function(swapStyle, target, fragment, swapSpec) {}  // Return array of new nodes if handled, falsy to skip
 }
 ```
+
+The `handle_swap` hook is called for any swap style not built into htmx. Return an array of the inserted/updated elements if your extension handled the swap, or a falsy value to fall through to the next handler (or an error if none handle it).
 
 ### History Hooks
 ```javascript
@@ -194,10 +196,10 @@ htmx 4 uses a completely different extension API:
 | `defineExtension()` | `registerExtension()` | Method renamed |
 | `onEvent(name, evt)` | Specific hooks | Use `htmx_before_request`, etc. |
 | `transformResponse()` | `htmx_after_request` | Modify `detail.ctx.text` |
-| `handleSwap()` | `htmx_handle_swap` | Access via `detail.swapSpec.style` |
+| `handleSwap()` | `handle_swap` | `(swapStyle, target, fragment, swapSpec)` — return array of nodes or falsy |
 | `encodeParameters()` | `htmx_config_request` | Modify `detail.ctx.request.body` |
 | `getSelectors()` | `htmx_after_init` | Check attributes with `api.attributeValue()` |
-| `isInlineSwap()` | Not needed | Handle in `htmx_handle_swap` |
+| `isInlineSwap()` | Not needed | Handle in `handle_swap` |
 
 ### Example Migration
 
