@@ -21,9 +21,10 @@ Uses [Alpine.js morph plugin](https://alpinejs.dev/plugins/morph) as the swap me
 </div>
 ```
 
+All Alpine `x-data` state (count, replaced, message, etc.) is preserved even when the entire Alpine component is swapped.
+
 ## Notes
 
 - Requires `@alpinejs/morph` plugin loaded before this extension
-- The server response must return the full element being replaced
-- Alpine state (x-data) is preserved across swaps
-- htmx has built in morph swap styles that work better than alpine-morph with the core hx-alpine-compat htmx extension
+- The server response must return the full element being replaced (the element with `hx-target="this"`)
+- Alpine state (`x-data`) is preserved across swaps

@@ -11,7 +11,7 @@ Transforms JSON/XML responses into HTML via client-side templates before swappin
 
 ## Usage
 
-Add a `<template-engine>-template` attribute to the element (or an ancestor) with the ID of the template:
+Add a `<template-engine>-template` attribute to the triggering element (or an ancestor) with the ID of the template:
 
 ```html
 <button hx-get="/some_json" mustache-template="my-template">Go</button>
@@ -20,12 +20,23 @@ Add a `<template-engine>-template` attribute to the element (or an ancestor) wit
 <button hx-get="/some_xml"  xslt-template="my-template">Go</button>
 ```
 
-Use `*-array-template` variants for APIs returning arrays — data is accessed as `data`:
+Each engine resolves templates differently:
+- `mustache` / `handlebars` / `xslt` — look up a `<script>` or `<template>` tag by ID
+- `nunjucks` — resolves by name via `nunjucks.render()`; if not found in the DOM, fetches it from the server as a file path
+
+## Array templates
+
+Use `*-array-template` variants for APIs returning arrays — the array is wrapped as `{ data: [...] }`:
 
 ```html
-<button hx-get="/some_json" mustache-array-template="my-template">Go</button>
+<button hx-get="/users" mustache-array-template="my-template">Go</button>
 
 <template id="my-template">
   {{#data}}<p>{{name}}</p>{{/data}}
 </template>
 ```
+
+## Notes
+
+- Many APIs use CORS protection that will block browser requests — you may need to proxy through your server
+- To allow cross-domain requests, set `selfRequestsOnly: false` in htmx config: `<meta name="htmx-config" content='{"selfRequestsOnly":false}'>`

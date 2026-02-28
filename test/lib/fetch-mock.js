@@ -85,7 +85,10 @@ class FetchMock {
         }
         if (typeof response === 'string') {
             let str = response;
-            response = new MockResponse(str, options);
+            let delay = options.delay;
+            response = delay
+                ? () => new Promise(resolve => setTimeout(() => resolve(new MockResponse(str, options)), delay))
+                : new MockResponse(str, options);
         }
         this.responses.push({
             method: upperCasedMethod,

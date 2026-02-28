@@ -1,6 +1,6 @@
 # ajax-header
 
-This extension adds the `X-Requested-With: XMLHttpRequest` header to all htmx requests.
+Adds the `X-Requested-With: XMLHttpRequest` header to all htmx requests. This header is commonly used by server-side frameworks to differentiate Ajax requests from normal HTTP requests.
 
 ## Install
 
