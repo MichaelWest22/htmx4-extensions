@@ -112,19 +112,14 @@
     // Pending post-swap tasks stored on ctx directly — sourceElement may be detached after body swap
 
     htmx.registerExtension('hx-streaming', {
-        htmx_before_request: (elt, detail) => {
+        htmx_before_response: (elt, detail) => {
             fetchActive = true;
-            const originalFetch = detail.ctx.fetch;
-            detail.ctx.fetch = async (url, options) => {
-                const response = await originalFetch(url, options);
-                if (fetchMode() === 'header' && !response.headers.has('HX-Stream-Partials')) {
-                    return response;
-                }
-                const text = await streamPartials(response, detail.ctx, elt);
-                return new Response(text, {
-                    status: response.status,
-                    headers: response.headers
-                });
+            const ctx = detail.ctx;
+            if (fetchMode() === 'header' && !ctx.response.headers.has('HX-Stream-Partials')) return;
+            const realText = ctx.response.raw.text.bind(ctx.response.raw);
+            ctx.response.raw.text = async () => {
+                const response = { body: ctx.response.raw.body, text: realText };
+                return streamPartials(response, ctx, elt);
             };
         },
 
