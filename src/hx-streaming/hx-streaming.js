@@ -30,9 +30,7 @@
     function processNode(node) {
         if (node.tagName === 'HX-READY') {
             node.remove();
-            const evt = new Event('DOMContentLoaded');
-            evt.synthetic = true;
-            document.dispatchEvent(evt);
+            htmx.process(document.body);
             return;
         }
 
@@ -89,9 +87,7 @@
 
     if (moEnabled()) {
         pageLoadObserver.observe(document.documentElement, { childList: true, subtree: true });
-        document.addEventListener('DOMContentLoaded', e => {
-            if (!e.synthetic) endPageLoad();
-        }, { once: true });
+        document.addEventListener('DOMContentLoaded', endPageLoad, { once: true });
         document.querySelectorAll('template[hx]').forEach(watchNode);
         document.querySelectorAll('*').forEach(n => /^HX-[A-Z]/i.test(n.tagName) && watchNode(n));
     }
@@ -105,9 +101,6 @@
     //   2. Main body swap     — return shell HTML to htmx for normal swap
     //   3. Post-body partials — swap into new page after htmx:after:swap
     //=========================================================================
-
-    // Matches <hx-*>, <template hx>, <hx-ready>
-    const partialRe = /(<hx-[a-z][^>]*>[\s\S]*?<\/hx-[a-z]+>|<template\s[^>]*\bhx\b[^>]*>[\s\S]*?<\/template>|<hx-ready[^>]*>\s*<\/hx-ready>)/gi;
 
     // Pending post-swap tasks stored on ctx directly — sourceElement may be detached after body swap
 
@@ -124,10 +117,14 @@
         },
 
         htmx_after_swap: (elt, detail) => {
+            detail.ctx._streamSwapOccurred = true;
+        },
+
+        htmx_finally_request: (elt, detail) => {
             const task = detail.ctx?._streamAfterSwap;
             if (task) {
                 delete detail.ctx._streamAfterSwap;
-                task();
+                task(detail.ctx._streamSwapOccurred === true).catch(() => {});
             }
         },
 
@@ -151,6 +148,7 @@
             while (true) {
                 const { done, value } = await reader.read();
                 if (!done) buffer += decoder.decode(value, { stream: true });
+                else buffer += decoder.decode();
 
                 // Phase 1: swap partials that arrive before <body> into current page
                 if (buffer.search(/<body[\s>]/i) === -1) {
@@ -170,11 +168,20 @@
                     let shell = buffer.slice(0, splitAt);
                     const tail = buffer.slice(splitAt);
                     shell = shell.replace(/<hx-ready[^>]*>\s*<\/hx-ready>/gi, '');
-                    const inlinePartials = [];
-                    shell = shell.replace(partialRe, m => { inlinePartials.push(m); return ''; });
+
+                    // Partials before <body> must be applied to the current page now,
+                    // regardless of whether they arrived in the same chunk as <body>.
+                    const bodyTagAt = shell.search(/<body[\s>]/i);
+                    if (bodyTagAt > 0) {
+                        const { buffer: preBodyCleaned } = await swapPartialsInBuffer(shell.slice(0, bodyTagAt), ctx);
+                        shell = preBodyCleaned + shell.slice(bodyTagAt);
+                    }
+
+                    const { buffer: cleanedShell, partials: inlinePartials } = stripStreamNodes(shell);
+                    shell = cleanedShell;
                     if (!done) {
-                        ctx._streamAfterSwap = () =>
-                            processAfterSwap(reader, decoder, inlinePartials.join('') + tail, ctx);
+                        ctx._streamAfterSwap = (swapOccurred) =>
+                            processAfterSwap(reader, decoder, inlinePartials.join('') + tail, ctx, swapOccurred);
                     }
                     return shell;
                 }
@@ -185,44 +192,68 @@
         }
 
         // No <body> — partial-only response
-        buffer += decoder.decode();
         ({ buffer } = await swapPartialsInBuffer(buffer, ctx));
         reader.releaseLock();
         return buffer;
     }
 
-    async function processAfterSwap(reader, decoder, tail, ctx) {
+    async function processAfterSwap(reader, decoder, tail, ctx, swapOccurred) {
         let buffer = tail;
         try {
-            ({ buffer } = await swapPartialsInBuffer(buffer, ctx));
+            if (swapOccurred) ({ buffer } = await swapPartialsInBuffer(buffer, ctx));
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
                 buffer += decoder.decode(value, { stream: true });
-                ({ buffer } = await swapPartialsInBuffer(buffer, ctx));
+                if (swapOccurred) ({ buffer } = await swapPartialsInBuffer(buffer, ctx));
             }
         } finally {
             reader.releaseLock();
         }
     }
 
+    // Extract and remove complete stream nodes from a buffer, handling arbitrary nesting.
+    // Returns { buffer: string with nodes removed, partials: array of extracted HTML strings }.
+    function stripStreamNodes(buffer) {
+        // Pass 1: tokenise — one regex sweep, quoted attr values treated as atomic so > inside them is ignored.
+        const tagRe = /<(\/?)(hx-[a-z][a-z0-9-]*|template)((?:\s(?:[^>"'\s]|"[^"]*"|'[^']*')*)*)\s*>/gi;
+        const tokens = [];
+        for (const m of buffer.matchAll(tagRe))
+            tokens.push({ close: m[1] === '/', name: m[2].toLowerCase(), attrs: m[3], start: m.index, end: m.index + m[0].length });
+
+        // Pass 2: for each stream root, depth-count forward for that tag name only until balanced.
+        const partials = [];
+        let out = '';
+        let cursor = 0;
+        let i = 0;
+        while (i < tokens.length) {
+            const tok = tokens[i];
+            if (tok.close) { i++; continue; }
+            if (tok.name === 'template' && !/\bhx\b/.test(tok.attrs)) { i++; continue; }
+
+            const rootName = tok.name;
+            let depth = 1, j = i + 1;
+            while (j < tokens.length && depth > 0) {
+                if (tokens[j].name === rootName) depth += tokens[j].close ? -1 : 1;
+                j++;
+            }
+            if (depth !== 0) break; // incomplete — leave remainder in buffer for next chunk
+
+            out += buffer.slice(cursor, tok.start); // non-partial text before this node
+            partials.push(buffer.slice(tok.start, tokens[j - 1].end));
+            cursor = tokens[j - 1].end;
+            i = j;
+        }
+
+        return { buffer: out + buffer.slice(cursor), partials };
+    }
+
     async function swapPartialsInBuffer(buffer, ctx) {
-        const matches = [];
-        let m;
-        partialRe.lastIndex = 0;
-        while ((m = partialRe.exec(buffer)) !== null) {
-            matches.push({ html: m[0], start: m.index, end: partialRe.lastIndex });
+        const { buffer: cleaned, partials } = stripStreamNodes(buffer);
+        for (const html of partials) {
+            if (/<hx-ready/i.test(html)) continue;
+            await htmx.swap({ text: html, sourceElement: document.body, swap: 'none' });
         }
-
-        for (const match of matches) {
-            if (/<hx-ready/i.test(match.html)) { continue; }
-            await htmx.swap({ text: match.html, sourceElement: document.body, swap: 'none' });
-        }
-
-        for (let i = matches.length - 1; i >= 0; i--) {
-            buffer = buffer.slice(0, matches[i].start) + buffer.slice(matches[i].end);
-        }
-
-        return { buffer };
+        return { buffer: cleaned };
     }
 })();
